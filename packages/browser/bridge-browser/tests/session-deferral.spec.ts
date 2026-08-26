@@ -27,10 +27,35 @@ function apiHarness() {
     rpcId: request.rpcId,
     result: { ok: true as const, value: { accepted: true } },
   }))
+  const sessionModels = vi.fn(async (request: Parameters<ApiProxy['sessions']['models']>[0]) => ({
+    rpcId: request.rpcId,
+    result: {
+      ok: true as const,
+      value: {
+        current: { provider: 'mafsolin', model: 'cx/gpt-5.6-sol' },
+        routable: true,
+        groups: [],
+        failures: [],
+      },
+    },
+  }))
+  const sessionSelectModel = vi.fn(async (request: Parameters<ApiProxy['sessions']['selectModel']>[0]) => ({
+    rpcId: request.rpcId,
+    result: {
+      ok: true as const,
+      value: { selected: { provider: request.payload.provider, model: request.payload.model } },
+    },
+  }))
   const api = {
-    sessions: { create: sessionCreate, history: sessionHistory, prompt: sessionPrompt },
+    sessions: {
+      create: sessionCreate,
+      history: sessionHistory,
+      prompt: sessionPrompt,
+      models: sessionModels,
+      selectModel: sessionSelectModel,
+    },
   } as unknown as ApiProxy
-  return { api, sessionCreate, sessionHistory, sessionPrompt }
+  return { api, sessionCreate, sessionHistory, sessionPrompt, sessionModels, sessionSelectModel }
 }
 
 async function provisionalId(wrapped: ApiProxy, rpcId = 'create-rpc'): Promise<ReturnType<typeof SessionId>> {
@@ -102,6 +127,35 @@ describe('withSessionDeferral', () => {
         projections: { asOfSeq: -1, values: { imageLimits } },
       },
     })
+  })
+
+  it('materializes a provisional session before listing its models', async () => {
+    const { api, sessionCreate, sessionModels } = apiHarness()
+    const wrapped = withSessionDeferral(api, true)
+    const id = await provisionalId(wrapped)
+
+    await wrapped.sessions.models({ rpcId: RpcId('models'), payload: { sessionId: id } })
+
+    expect(sessionCreate).toHaveBeenCalledWith({
+      rpcId: expect.anything(),
+      payload: { sessionId: id },
+    })
+    expect(sessionModels).toHaveBeenCalledWith({ rpcId: RpcId('models'), payload: { sessionId: id } })
+  })
+
+  it('materializes a provisional session before selecting its model', async () => {
+    const { api, sessionCreate, sessionSelectModel } = apiHarness()
+    const wrapped = withSessionDeferral(api, true)
+    const id = await provisionalId(wrapped)
+    const request = {
+      rpcId: RpcId('select'),
+      payload: { sessionId: id, provider: 'mafsolin', model: 'cx/gpt-5.6-terra' },
+    }
+
+    await wrapped.sessions.selectModel(request)
+
+    expect(sessionCreate).toHaveBeenCalledTimes(1)
+    expect(sessionSelectModel).toHaveBeenCalledWith(request)
   })
 
   it('materializes the session on the first prompt, replaying the create payload', async () => {

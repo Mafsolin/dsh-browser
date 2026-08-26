@@ -24,6 +24,8 @@ const PROVISIONAL_TTL_MS = 30 * 60_000
 type CreateRequest = Parameters<ApiProxy['sessions']['create']>[0]
 type HistoryRequest = Parameters<ApiProxy['sessions']['history']>[0]
 type PromptRequest = Parameters<ApiProxy['sessions']['prompt']>[0]
+type ModelsRequest = Parameters<ApiProxy['sessions']['models']>[0]
+type SelectModelRequest = Parameters<ApiProxy['sessions']['selectModel']>[0]
 
 interface ProvisionalEntry {
   /** The original create payload, replayed at materialization (keeps cwd/workspaceId). */
@@ -62,6 +64,27 @@ export function withSessionDeferral(
   const mintedId = (payload: CreateRequest['payload']): SessionId =>
     payload.sessionId ?? `session-${randomUUID()}` as SessionId
 
+  /** Materialize a provisional session before an RPC that requires a resident Agent. */
+  const materialize = async (sessionId: SessionId) => {
+    const entry = provisional.get(sessionId)
+    if (entry === undefined) return undefined
+    const existing = materializing.get(sessionId)
+    const pending = existing ?? api.sessions.create({
+      rpcId: RpcId(randomUUID()),
+      payload: { ...entry.payload, sessionId },
+    })
+    if (existing === undefined) {
+      materializing.set(sessionId, pending)
+      void pending.then(
+        () => { materializing.delete(sessionId) },
+        () => { materializing.delete(sessionId) },
+      )
+    }
+    const created = await pending
+    if (created.result.ok) provisional.delete(sessionId)
+    return created
+  }
+
   return {
     ...api,
     sessions: {
@@ -88,22 +111,28 @@ export function withSessionDeferral(
           },
         }
       },
-      async prompt(request: PromptRequest) {
-        const entry = provisional.get(request.payload.sessionId)
-        if (entry === undefined) return api.sessions.prompt(request)
-        const existing = materializing.get(request.payload.sessionId)
-        const pending = existing ?? api.sessions.create({
-          rpcId: RpcId(randomUUID()),
-          payload: { ...entry.payload, sessionId: request.payload.sessionId },
-        })
-        if (existing === undefined) {
-          materializing.set(request.payload.sessionId, pending)
-          void pending.then(
-            () => { materializing.delete(request.payload.sessionId) },
-            () => { materializing.delete(request.payload.sessionId) },
-          )
+      async models(request: ModelsRequest) {
+        if (provisional.has(request.payload.sessionId)) {
+          const created = await materialize(request.payload.sessionId)
+          if (created !== undefined && !created.result.ok) {
+            return created as unknown as Awaited<ReturnType<ApiProxy['sessions']['models']>>
+          }
         }
-        const created = await pending
+        return api.sessions.models(request)
+      },
+      async selectModel(request: SelectModelRequest) {
+        if (provisional.has(request.payload.sessionId)) {
+          const created = await materialize(request.payload.sessionId)
+          if (created !== undefined && !created.result.ok) {
+            return created as unknown as Awaited<ReturnType<ApiProxy['sessions']['selectModel']>>
+          }
+        }
+        return api.sessions.selectModel(request)
+      },
+      async prompt(request: PromptRequest) {
+        if (!provisional.has(request.payload.sessionId)) return api.sessions.prompt(request)
+        const created = await materialize(request.payload.sessionId)
+        if (created === undefined) return api.sessions.prompt(request)
         if (!created.result.ok) {
           // The create failure value shape differs from prompt's success
           // shape; the carrier relays only result.ok/error, so the value
