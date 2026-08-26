@@ -62,6 +62,7 @@ export interface PanelCopy {
     bridgeAddress: string
     bridgeHelp: string
     bridgePlaceholder: string
+    token: string
     tokenHelp: string
     tokenPlaceholder: string
     pageSharing: string
@@ -285,6 +286,7 @@ const EN: PanelCopy = {
     bridgeAddress: 'Bridge address',
     bridgeHelp: 'Leave blank to detect a local service automatically',
     bridgePlaceholder: 'Auto-detect 3080 / 3081 / 3090 / 14389 / 43189',
+    token: 'Token',
     tokenHelp: 'Required by Firefox and remote deployments',
     tokenPlaceholder: 'Required for Firefox / remote deployments',
     pageSharing: 'Page content sharing',
@@ -508,6 +510,7 @@ const ZH: PanelCopy = {
     bridgeAddress: '桥地址',
     bridgeHelp: '留空时自动检测本机服务',
     bridgePlaceholder: '自动检测 3080 / 3081 / 3090 / 14389 / 43189',
+    token: '令牌',
     tokenHelp: 'Firefox 和远程部署需要填写',
     tokenPlaceholder: 'Firefox / 远程部署时填写',
     pageSharing: '页面内容共享',
@@ -731,6 +734,7 @@ const RU: PanelCopy = {
     bridgeAddress: 'Адрес моста',
     bridgeHelp: 'Оставьте поле пустым, чтобы автоматически найти локальную службу',
     bridgePlaceholder: 'Автоопределение: 3080 / 3081 / 3090 / 14389 / 43189',
+    token: 'Токен',
     tokenHelp: 'Необходим для Firefox и удалённых развёртываний',
     tokenPlaceholder: 'Необходим для Firefox и удалённых развёртываний',
     pageSharing: 'Передача содержимого страницы',

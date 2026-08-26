@@ -8,12 +8,14 @@ export type UiLocalePreference = 'auto' | 'en' | 'ru'
 export type UiTheme = 'system' | 'light' | 'dark'
 
 /**
- * Chinese browser locales use Chinese; every other locale deliberately falls
- * back to English so an untranslated third language never leaks into the UI.
+ * Resolve browser language variants to a catalog shipped by the extension.
+ * Unsupported languages deliberately fall back to English.
  */
 export function localeFromLanguage(language: string | null | undefined): UiLocale {
   const normalized = language?.trim().toLowerCase() ?? ''
-  return normalized === 'zh' || normalized.startsWith('zh-') ? 'zh' : 'en'
+  if (normalized === 'zh' || normalized.startsWith('zh-')) return 'zh'
+  if (normalized === 'ru' || normalized.startsWith('ru-')) return 'ru'
+  return 'en'
 }
 
 /** Read the browser's first preferred language, with the extension UI locale as a fallback. */

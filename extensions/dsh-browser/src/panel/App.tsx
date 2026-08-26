@@ -1649,7 +1649,7 @@ export function App(): React.JSX.Element {
             />
           </label>
           <label>
-            <span>Token</span>
+            <span>{copy.settings.token}</span>
             <small>{copy.settings.tokenHelp}</small>
             <input
               type="password"

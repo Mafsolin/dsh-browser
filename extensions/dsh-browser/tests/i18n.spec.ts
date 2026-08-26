@@ -15,7 +15,13 @@ describe('browser locale selection', () => {
     expect(localeFromLanguage('ZH-hant-HK')).toBe('zh')
   })
 
-  it('defaults every non-Chinese or missing locale to English', () => {
+  it('uses Russian for every ru locale variant', () => {
+    expect(localeFromLanguage('ru')).toBe('ru')
+    expect(localeFromLanguage('ru-RU')).toBe('ru')
+    expect(localeFromLanguage('RU-kz')).toBe('ru')
+  })
+
+  it('defaults every unsupported or missing locale to English', () => {
     expect(localeFromLanguage('en-US')).toBe('en')
     expect(localeFromLanguage('ja-JP')).toBe('en')
     expect(localeFromLanguage('fr')).toBe('en')
@@ -38,5 +44,8 @@ describe('browser locale selection', () => {
     expect(PANEL_COPY.zh.app.newSession).toBe('新对话')
     expect(PANEL_COPY.zh.app.overviewPage).toBe('先概览这个页面')
     expect(PANEL_COPY.zh.approval.allowOnce).toBe('仅允许这一次')
+    expect(PANEL_COPY.ru.app.newSession).toBe('Новый чат')
+    expect(PANEL_COPY.ru.settings.language).toBe('Язык интерфейса')
+    expect(PANEL_COPY.ru.approval.allowOnce).toBe('Разрешить один раз')
   })
 })

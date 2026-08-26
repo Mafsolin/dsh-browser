@@ -1,0 +1,11 @@
+{
+  "extensionName": {
+    "message": "Браузерный ассистент dsh"
+  },
+  "extensionDescription": {
+    "message": "Боковая панель Chrome/Brave, которая позволяет dsh читать страницы и управлять браузером без компьютерного зрения."
+  },
+  "actionTitle": {
+    "message": "Открыть браузерный ассистент dsh"
+  }
+}
