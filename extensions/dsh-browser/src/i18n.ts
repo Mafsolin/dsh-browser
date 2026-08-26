@@ -1,5 +1,11 @@
-/** Languages supported by the extension UI. */
-export type UiLocale = 'en' | 'zh'
+/** Languages supported by the rendered extension UI. */
+export type UiLocale = 'en' | 'zh' | 'ru'
+
+/** User-selectable locale preference persisted in chrome.storage.local. */
+export type UiLocalePreference = 'auto' | 'en' | 'ru'
+
+/** User-selectable color theme persisted in chrome.storage.local. */
+export type UiTheme = 'system' | 'light' | 'dark'
 
 /**
  * Chinese browser locales use Chinese; every other locale deliberately falls
@@ -11,6 +17,11 @@ export function localeFromLanguage(language: string | null | undefined): UiLocal
 }
 
 /** Read the browser's first preferred language, with the extension UI locale as a fallback. */
+export function resolveUiLocale(preference: UiLocalePreference, language?: string | null): UiLocale {
+  if (preference === 'en' || preference === 'ru') return preference
+  return language === undefined ? getUiLocale() : localeFromLanguage(language)
+}
+
 export function getUiLocale(): UiLocale {
   let language: string | undefined
   if (typeof navigator !== 'undefined') {

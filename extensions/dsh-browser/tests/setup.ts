@@ -4,6 +4,11 @@
  * does not implement CSS.escape. Stub both with browser-equivalent behavior.
  */
 
+if (typeof globalThis.Element === 'undefined') {
+  class ElementStub {}
+  Object.defineProperty(globalThis, 'Element', { configurable: true, value: ElementStub })
+}
+
 const FAKE_RECT: DOMRect = {
   x: 0,
   y: 0,

@@ -48,7 +48,7 @@ import {
   type ApprovalPrompt,
   type ApprovalRequest,
 } from '../security/approval.ts'
-import { getUiLocale } from '../i18n.ts'
+import { getUiLocale, type UiLocalePreference, type UiTheme } from '../i18n.ts'
 import { InteractionResponseRouter } from './responses.ts'
 import {
   actionCoveredByTrustedOrigins,
@@ -81,6 +81,10 @@ export interface Settings {
   approvalNotifications: boolean
   /** Restore the last active browser conversation when the panel reopens. */
   autoResumeSession: boolean
+  /** Panel language preference; auto preserves browser-language detection. */
+  uiLocale: UiLocalePreference
+  /** Panel color theme preference. */
+  theme: UiTheme
 }
 
 const SETTINGS_DEFAULTS: Settings = {
@@ -91,6 +95,8 @@ const SETTINGS_DEFAULTS: Settings = {
   trustedActionOrigins: [],
   approvalNotifications: true,
   autoResumeSession: true,
+  uiLocale: 'auto',
+  theme: 'system',
 }
 
 /**
@@ -242,6 +248,8 @@ function normalizeSettings(candidate: Settings): Settings {
     trustedActionOrigins: trusted,
     approvalNotifications: candidate.approvalNotifications !== false,
     autoResumeSession: candidate.autoResumeSession !== false,
+    uiLocale: candidate.uiLocale === 'en' || candidate.uiLocale === 'ru' ? candidate.uiLocale : 'auto',
+    theme: candidate.theme === 'light' || candidate.theme === 'dark' ? candidate.theme : 'system',
   }
 }
 

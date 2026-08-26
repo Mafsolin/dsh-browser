@@ -7,7 +7,7 @@
  * @module
  */
 
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { BRIDGE_SESSION_PURGE_METHOD, DEFAULT_SNAPSHOT_MAX_CHARS } from '@yuxianglin/dsh-bridge-browser/src/protocol.ts'
 import type { BridgeCaps } from '@yuxianglin/dsh-bridge-browser/src/protocol.ts'
 import type { ServerFrame } from '@yuxianglin/dsh-bridge-browser/src/protocol.ts'
@@ -17,7 +17,18 @@ import { connectPanel, PanelRpcError, type PanelApi, type PanelSettings } from '
 import { renderMarkdown } from './markdown.ts'
 import whaleUrl from '../../assets/icons/deepseek-256.png'
 import type { ApprovalDecision, ApprovalRequest } from '../security/approval.ts'
-import { getUiLocale } from '../i18n.ts'
+import { resolveUiLocale, type UiLocale, type UiLocalePreference, type UiTheme } from '../i18n.ts'
+import {
+  contextOccupancy,
+  effectiveReasoningEffort,
+  formatTokens,
+  parseContextPressure,
+  parseSessionModels,
+  selectedCatalogModel,
+  type ContextPressure,
+  type ModelSelection,
+  type SessionModels,
+} from './model-controls.ts'
 import { PANEL_COPY, type PanelCopy } from './strings.ts'
 import { QuestionCard } from './QuestionCard.tsx'
 import { UpdateCard } from './UpdateCard.tsx'
@@ -514,6 +525,29 @@ interface HistoryPage {
   }
 }
 
+function ContextRing({ pressure, locale }: { pressure: ContextPressure | null; locale: UiLocale }): React.JSX.Element | null {
+  const value = contextOccupancy(pressure)
+  if (value === null) return null
+  const radius = 7
+  const circumference = 2 * Math.PI * radius
+  const offset = circumference * (1 - value.percent / 100)
+  const label = locale === 'ru'
+    ? `Контекст: ${formatTokens(value.usedTokens)} из ${formatTokens(value.contextWindow)} (${value.percent}%)`
+    : locale === 'zh'
+      ? `上下文：${formatTokens(value.usedTokens)} / ${formatTokens(value.contextWindow)}（${value.percent}%）`
+      : `Context: ${formatTokens(value.usedTokens)} of ${formatTokens(value.contextWindow)} (${value.percent}%)`
+  return (
+    <span className="context-ring" title={label} aria-label={label} role="img">
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <circle className="context-ring-track" cx="10" cy="10" r={radius} />
+        <circle className="context-ring-value" cx="10" cy="10" r={radius}
+          strokeDasharray={circumference} strokeDashoffset={offset} />
+      </svg>
+      <span>{value.percent}</span>
+    </span>
+  )
+}
+
 const ToolActivity = memo(function ToolActivity({ row, copy }: { row: Row; copy: PanelCopy }): React.JSX.Element {
   const running = row.status === 'running'
   return (
@@ -531,7 +565,9 @@ const ToolActivity = memo(function ToolActivity({ row, copy }: { row: Row; copy:
 })
 
 export function App(): React.JSX.Element {
-  const locale = useMemo(() => getUiLocale(), [])
+  const [uiLocale, setUiLocale] = useState<UiLocalePreference>('auto')
+  const [theme, setTheme] = useState<UiTheme>('system')
+  const locale = resolveUiLocale(uiLocale)
   const copy = PANEL_COPY[locale]
   const [api] = useState<PanelApi>(() => connectPanel())
   const [state, setState] = useState<BridgeState>('stopped')
@@ -561,6 +597,10 @@ export function App(): React.JSX.Element {
   const [relayNotice, setRelayNotice] = useState<string | null>(null)
   const [relayBusy, setRelayBusy] = useState(false)
   const [sessionTitle, setSessionTitle] = useState<string | null>(null)
+  const [modelCatalog, setModelCatalog] = useState<SessionModels | null>(null)
+  const [modelMenuOpen, setModelMenuOpen] = useState(false)
+  const [modelSelecting, setModelSelecting] = useState(false)
+  const [contextPressure, setContextPressure] = useState<ContextPressure | null>(null)
   const [resumeHint, setResumeHint] = useState<{ ready: boolean; sessionId: string | null }>({ ready: false, sessionId: null })
   const [questions, setQuestions] = useState<PendingQuestion[]>([])
   const [questionSubmissions, setQuestionSubmissions] = useState<ResolvedQuestion[]>([])
@@ -642,9 +682,22 @@ export function App(): React.JSX.Element {
         trustedActionOrigins: raw?.trustedActionOrigins ?? [],
         approvalNotifications: raw?.approvalNotifications ?? true,
         autoResumeSession: raw?.autoResumeSession ?? true,
+        uiLocale: raw?.uiLocale === 'en' || raw?.uiLocale === 'ru' ? raw.uiLocale : 'auto',
+        theme: raw?.theme === 'light' || raw?.theme === 'dark' ? raw.theme : 'system',
       })
+      setUiLocale(raw?.uiLocale === 'en' || raw?.uiLocale === 'ru' ? raw.uiLocale : 'auto')
+      setTheme(raw?.theme === 'light' || raw?.theme === 'dark' ? raw.theme : 'system')
     })
   }, [])
+
+  useEffect(() => {
+    document.documentElement.lang = locale === 'zh' ? 'zh-CN' : locale
+    document.title = copy.documentTitle
+  }, [locale, copy.documentTitle])
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+  }, [theme])
 
   // 每次连接重启（设置变更/断线重连）都新建会话。状态消息逐条监听：
   // React 会把 stopped/connecting 等瞬时状态合并进同一帧渲染，依赖渲染
@@ -774,10 +827,12 @@ export function App(): React.JSX.Element {
         value?: unknown
         seq?: unknown
       }
-      if (typeof projection.sessionId === 'string'
-        && projection.key === 'imageLimits'
-        && typeof projection.seq === 'number') {
-        applyImageProjection(projection.sessionId, projection.seq, projection.value)
+      if (typeof projection.sessionId === 'string' && typeof projection.seq === 'number') {
+        if (projection.key === 'imageLimits') {
+          applyImageProjection(projection.sessionId, projection.seq, projection.value)
+        } else if (projection.key === 'contextPressure' && projection.sessionId === sessionRef.current) {
+          setContextPressure(parseContextPressure(projection.value))
+        }
       }
       return
     }
@@ -882,10 +937,42 @@ export function App(): React.JSX.Element {
     return api.rpc<HistoryPage>('session.history', { sessionId: id })
   }
 
+  async function refreshModelCatalog(id: string | null = sessionRef.current): Promise<void> {
+    if (id === null) return
+    try {
+      const parsed = parseSessionModels(await api.rpc('session.models', { sessionId: id }))
+      if (sessionRef.current === id && parsed !== null) setModelCatalog(parsed)
+    } catch (cause) {
+      if (sessionRef.current === id) setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
+  async function selectSessionModel(selection: ModelSelection): Promise<void> {
+    const id = sessionRef.current
+    if (id === null || modelSelecting || working || sessionChangingRef.current) return
+    setModelSelecting(true)
+    setError(null)
+    try {
+      await api.rpc('session.selectModel', { sessionId: id, ...selection })
+      await refreshModelCatalog(id)
+      setModelMenuOpen(false)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setModelSelecting(false)
+    }
+  }
+
   function applyHistory(id: string, history: HistoryPage): void {
     if (sessionRef.current !== id) return
     const events = history.events.map((entry) => entry.event)
     applyHistoryImageProjection(id, history.projections)
+    const projectionValues = history.projections?.values
+    setContextPressure(parseContextPressure(
+      typeof projectionValues === 'object' && projectionValues !== null
+        ? projectionValues.contextPressure
+        : undefined,
+    ))
     const historyTitle = latestSessionTitle(events)
     if (historyTitle !== undefined) setSessionTitle(historyTitle)
     setRows(mergeHistoryRows(events, nextSeq, locale))
@@ -909,6 +996,7 @@ export function App(): React.JSX.Element {
     setSessionTitle(null)
     sessionRuntimeRef.current.seedRunning(created.sessionId, false)
     applyHistory(created.sessionId, await readHistory(created.sessionId))
+    await refreshModelCatalog(created.sessionId)
   }
 
   /** 拉取会话列表并排除已归档条目：上游 session.list 不做归档过滤，已删除会话会以冷/附着形态残留。 */
@@ -1002,7 +1090,7 @@ export function App(): React.JSX.Element {
       prepareSessionSwitch(runtime.running, runtime.questions)
       sessionRef.current = entry.sessionId
       setSessionTitle(projectedSessionTitle(entry) ?? sessionDisplayTitle(entry))
-      await refreshHistory(entry.sessionId)
+      await Promise.all([refreshHistory(entry.sessionId), refreshModelCatalog(entry.sessionId)])
     } catch (cause) {
       if (sessionTransitionRef.current === transition) {
         setError(cause instanceof Error ? cause.message : String(cause))
@@ -1526,6 +1614,32 @@ export function App(): React.JSX.Element {
         <UpdateCard copy={copy.update} />
         <div className="settings-panel">
           <label>
+            <span>{copy.settings.language}</span>
+            <small>{copy.settings.languageHelp}</small>
+            <select value={uiLocale} onChange={(event) => {
+              const value = event.target.value as UiLocalePreference
+              setUiLocale(value)
+              setSettings((current) => current === null ? current : { ...current, uiLocale: value })
+            }}>
+              <option value="auto">{copy.settings.languageAuto}</option>
+              <option value="en">{copy.settings.languageEnglish}</option>
+              <option value="ru">{copy.settings.languageRussian}</option>
+            </select>
+          </label>
+          <label>
+            <span>{copy.settings.theme}</span>
+            <small>{copy.settings.themeHelp}</small>
+            <select value={theme} onChange={(event) => {
+              const value = event.target.value as UiTheme
+              setTheme(value)
+              setSettings((current) => current === null ? current : { ...current, theme: value })
+            }}>
+              <option value="system">{copy.settings.themeSystem}</option>
+              <option value="light">{copy.settings.themeLight}</option>
+              <option value="dark">{copy.settings.themeDark}</option>
+            </select>
+          </label>
+          <label>
             <span>{copy.settings.bridgeAddress}</span>
             <small>{copy.settings.bridgeHelp}</small>
             <input
@@ -1828,6 +1942,68 @@ export function App(): React.JSX.Element {
       )}
       {error !== null && <div className="error">{error}</div>}
       <footer className="composer">
+        {modelCatalog !== null && (
+          <div className="model-control-bar">
+            <button className="model-control-trigger" type="button"
+              disabled={!modelCatalog.routable || modelSelecting || working || sessionChanging}
+              aria-expanded={modelMenuOpen}
+              onClick={() => setModelMenuOpen((open) => !open)}>
+              <span>{selectedCatalogModel(modelCatalog)?.name ?? modelCatalog.current.model}</span>
+              {effectiveReasoningEffort(modelCatalog) !== undefined && (
+                <small>{selectedCatalogModel(modelCatalog)?.reasoning?.efforts
+                  .find((effort) => effort.id === effectiveReasoningEffort(modelCatalog))?.name
+                  ?? effectiveReasoningEffort(modelCatalog)}</small>
+              )}
+              <ChevronDownIcon />
+            </button>
+            <ContextRing pressure={contextPressure} locale={locale} />
+            {modelMenuOpen && (
+              <div className="model-control-menu">
+                <div className="model-control-models">
+                  {modelCatalog.groups.map((group) => (
+                    <div className="model-group" key={group.id}>
+                      <strong>{group.name}</strong>
+                      {group.models.map((model) => (
+                        <button type="button" key={`${group.id}/${model.id}`}
+                          aria-current={group.id === modelCatalog.current.provider && model.id === modelCatalog.current.model}
+                          onClick={() => { void selectSessionModel({
+                            provider: group.id,
+                            model: model.id,
+                            ...(model.reasoning?.defaultEffort === undefined ? {} : { reasoningEffort: model.reasoning.defaultEffort }),
+                          }) }}>
+                          <span>{model.name}</span>
+                          {model.description !== undefined && <small>{model.description}</small>}
+                        </button>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+                {selectedCatalogModel(modelCatalog)?.reasoning !== undefined && (
+                  <div className="reasoning-options">
+                    {selectedCatalogModel(modelCatalog)?.reasoning?.defaultEffort === undefined && (
+                      <button type="button" aria-current={modelCatalog.current.reasoningEffort === undefined}
+                        onClick={() => { void selectSessionModel({ provider: modelCatalog.current.provider, model: modelCatalog.current.model }) }}>
+                        {locale === 'ru' ? 'По умолчанию' : locale === 'zh' ? '服务商默认' : 'Provider default'}
+                      </button>
+                    )}
+                    {selectedCatalogModel(modelCatalog)?.reasoning?.efforts.map((effort) => (
+                      <button type="button" key={effort.id}
+                        aria-current={effectiveReasoningEffort(modelCatalog) === effort.id}
+                        title={effort.description}
+                        onClick={() => { void selectSessionModel({
+                          provider: modelCatalog.current.provider,
+                          model: modelCatalog.current.model,
+                          reasoningEffort: effort.id,
+                        }) }}>
+                        {effort.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
         <div className="composer-box">
           {selection !== null && (
             <SelectionQuote
